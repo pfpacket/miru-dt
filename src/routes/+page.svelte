@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { DtNode, LoadResult, SourceLoc } from '$lib/types';
   import { loadDtb, loadDts, loadLive, pickDtbFile, pickDtsFile } from '$lib/api';
   import TreeNode from '$lib/TreeNode.svelte';
@@ -75,6 +76,23 @@
     selectedNode = node;
     tab = 'details';
   }
+
+  // Dev-only autoload for automated UI verification:
+  //   VITE_AUTOLOAD=<file.dts> VITE_AUTOLOAD_INC=<dirs> VITE_AUTOLOAD_SELECT=</node/path> bun run tauri dev
+  onMount(() => {
+    const auto = import.meta.env.VITE_AUTOLOAD as string | undefined;
+    if (!import.meta.env.DEV || typeof auto !== 'string' || auto === '') return;
+    includeDirsRaw = (import.meta.env.VITE_AUTOLOAD_INC as string | undefined) ?? '';
+    void run({ kind: 'dts', path: auto }).then(() => {
+      const sel = import.meta.env.VITE_AUTOLOAD_SELECT as string | undefined;
+      if (!sel || result === null) return;
+      let node: DtNode | undefined = result.tree;
+      for (const seg of sel.split('/').filter(Boolean)) {
+        node = node?.children.find((c) => c.name === seg);
+      }
+      if (node !== undefined) onselect(sel, node);
+    });
+  });
 </script>
 
 <div class="app">
@@ -177,13 +195,27 @@
                       <span class="prop-eq">=</span>
                       <span class="prop-value">{p.value}</span>
                     {/if}
+                    {#if p.provenance !== null && p.provenance.modified.length > 0}
+                      <span
+                        class="badge modified"
+                        title="overridden {p.provenance.modified.length} time{p.provenance.modified.length > 1 ? 's' : ''}"
+                      >
+                        ✎{p.provenance.modified.length}
+                      </span>
+                    {/if}
                     {#if p.deleted}<span class="badge removed">deleted</span>{/if}
                   </div>
                   {#if p.provenance !== null}
-                    <div class="prop-prov">
-                      defined <span class="loc" title={p.provenance.defined.file}>{fmtLoc(p.provenance.defined)}</span>
+                    <div class="prop-sites">
+                      <div class="prov-row">
+                        <span class="prov-kind defined">defined</span>
+                        <span class="loc" title={p.provenance.defined.file}>{fmtLoc(p.provenance.defined)}</span>
+                      </div>
                       {#each p.provenance.modified as loc, j (j)}
-                        · modified <span class="loc" title={loc.file}>{fmtLoc(loc)}</span>
+                        <div class="prov-row">
+                          <span class="prov-kind modified">modified</span>
+                          <span class="loc" title={loc.file}>{fmtLoc(loc)}</span>
+                        </div>
                       {/each}
                     </div>
                   {/if}
@@ -515,10 +547,19 @@
     word-break: break-all;
     white-space: pre-wrap;
   }
-  .prop-prov {
-    font-size: 11px;
-    color: var(--muted);
-    margin-top: 3px;
+  .prop-sites {
+    margin-top: 4px;
+  }
+  .prop-sites .prov-row {
+    padding: 1px 0;
+  }
+  .prop-sites .loc {
+    font-size: 11.5px;
+    color: #aeb6c4;
+  }
+  .badge.modified {
+    background: #3a2f14;
+    color: #eab308;
   }
   .badge {
     font-size: 10px;
