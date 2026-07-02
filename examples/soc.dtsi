@@ -1,0 +1,46 @@
+/* Demo SoC include: defines the hardware; boards enable and extend it. */
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "riscv";
+			reg = <0>;
+			status = "disabled";
+		};
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		uart0: serial@10000000 {
+			compatible = "ns16550a";
+			reg = <0x10000000 0x100>;
+			clock-frequency = <3686400>;
+			status = "disabled";
+		};
+
+		gpio0: gpio@10060000 {
+			compatible = "demo,gpio";
+			reg = <0x10060000 0x1000>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			status = "disabled";
+		};
+
+		wdt0: watchdog@10070000 {
+			compatible = "demo,wdt";
+			reg = <0x10070000 0x1000>;
+			status = "disabled";
+		};
+	};
+};

@@ -1,156 +1,558 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import type { DtNode, LoadResult, SourceLoc } from '$lib/types';
+  import { loadDtb, loadDts, loadLive, pickDtbFile, pickDtsFile } from '$lib/api';
+  import TreeNode from '$lib/TreeNode.svelte';
+  import IncludeGraph from '$lib/IncludeGraph.svelte';
 
-  let name = $state("");
-  let greetMsg = $state("");
+  type LastLoad =
+    | { kind: 'dts'; path: string }
+    | { kind: 'dtb'; path: string }
+    | { kind: 'live' };
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
+  let result = $state<LoadResult | null>(null);
+  let error = $state<string | null>(null);
+  let busy = $state(false);
+  let filter = $state('');
+  let includeDirsRaw = $state('');
+  let selectedPath = $state<string | null>(null);
+  let selectedNode = $state<DtNode | null>(null);
+  let tab = $state<'details' | 'includes' | 'warnings'>('details');
+  let lastLoad = $state<LastLoad | null>(null);
+
+  const includeDirs = $derived(
+    includeDirsRaw
+      .split(':')
+      .map((d) => d.trim())
+      .filter((d) => d.length > 0)
+  );
+
+  const sourceDir = $derived(
+    result && result.kind !== 'live' ? result.source.replace(/\/[^/]*$/, '') : ''
+  );
+
+  function shorten(file: string): string {
+    return sourceDir && file.startsWith(sourceDir + '/') ? file.slice(sourceDir.length + 1) : file;
+  }
+
+  function fmtLoc(loc: SourceLoc): string {
+    return `${shorten(loc.file)}:${loc.line}`;
+  }
+
+  async function run(load: LastLoad) {
+    busy = true;
+    error = null;
+    try {
+      if (load.kind === 'dts') {
+        result = await loadDts(load.path, includeDirs);
+      } else if (load.kind === 'dtb') {
+        result = await loadDtb(load.path);
+      } else {
+        result = await loadLive();
+      }
+      lastLoad = load;
+      selectedPath = '/';
+      selectedNode = result.tree;
+      tab = 'details';
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function openDts() {
+    const path = await pickDtsFile();
+    if (path !== null) await run({ kind: 'dts', path });
+  }
+
+  async function openDtb() {
+    const path = await pickDtbFile();
+    if (path !== null) await run({ kind: 'dtb', path });
+  }
+
+  function onselect(path: string, node: DtNode) {
+    selectedPath = path;
+    selectedNode = node;
+    tab = 'details';
   }
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+<div class="app">
+  <header>
+    <h1>miru-dt</h1>
+    <span class="tagline">device tree visualizer</span>
+    <div class="actions">
+      <button onclick={openDts} disabled={busy}>Open .dts…</button>
+      <button onclick={openDtb} disabled={busy}>Open .dtb…</button>
+      <button onclick={() => run({ kind: 'live' })} disabled={busy}>/proc/device-tree</button>
+      {#if lastLoad !== null}
+        <button onclick={() => lastLoad && run(lastLoad)} disabled={busy}>Reload</button>
+      {/if}
+    </div>
+    <input
+      class="include-dirs"
+      type="text"
+      placeholder="include dirs for #include <…> (colon-separated)"
+      bind:value={includeDirsRaw}
+    />
+  </header>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
+  {#if error !== null}
+    <div class="banner error">{error}</div>
+  {/if}
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-</main>
+  {#if result !== null}
+    <div class="source-line">
+      <span class="kind-badge {result.kind}">{result.kind}</span>
+      <span class="source-path" title={result.source}>{result.source}</span>
+      {#if busy}<span class="busy">loading…</span>{/if}
+    </div>
+    <main>
+      <section class="tree-pane">
+        <input class="search" type="search" placeholder="Filter nodes, labels, properties…" bind:value={filter} />
+        <div class="tree-scroll">
+          <TreeNode node={result.tree} path="/" depth={0} {selectedPath} {filter} {onselect} />
+        </div>
+      </section>
+
+      <section class="side-pane">
+        <nav class="tabs">
+          <button class:active={tab === 'details'} onclick={() => (tab = 'details')}>Node details</button>
+          <button class:active={tab === 'includes'} onclick={() => (tab = 'includes')}>
+            Includes{result.includeGraph ? ` (${result.includeGraph.edges.length})` : ''}
+          </button>
+          <button class:active={tab === 'warnings'} onclick={() => (tab = 'warnings')}>
+            Warnings ({result.warnings.length})
+          </button>
+        </nav>
+
+        <div class="tab-body">
+          {#if tab === 'details'}
+            {#if selectedNode !== null}
+              <h2 class="node-path">{selectedPath}</h2>
+              {#if selectedNode.labels.length > 0}
+                <div class="chips">
+                  {#each selectedNode.labels as label (label)}
+                    <span class="chip">{label}</span>
+                  {/each}
+                </div>
+              {/if}
+              {#if selectedNode.deleted}
+                <div class="banner deleted-banner">
+                  This node was removed with /delete-node/ — shown for provenance.
+                </div>
+              {/if}
+
+              {#if selectedNode.provenance !== null}
+                <div class="prov-block">
+                  <div class="prov-row">
+                    <span class="prov-kind defined">defined</span>
+                    <span class="loc" title={selectedNode.provenance.defined.file}>
+                      {fmtLoc(selectedNode.provenance.defined)}
+                    </span>
+                  </div>
+                  {#each selectedNode.provenance.modified as loc, i (i)}
+                    <div class="prov-row">
+                      <span class="prov-kind modified">modified</span>
+                      <span class="loc" title={loc.file}>{fmtLoc(loc)}</span>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <p class="hint">
+                  No source provenance — compiled blobs and the live tree carry no file/line
+                  information.
+                </p>
+              {/if}
+
+              <h3>Properties ({selectedNode.properties.length})</h3>
+              {#if selectedNode.properties.length === 0}
+                <p class="hint">No properties.</p>
+              {/if}
+              {#each selectedNode.properties as p, i (i)}
+                <div class="prop" class:deleted={p.deleted}>
+                  <div class="prop-line">
+                    <span class="prop-name">{p.name}</span>
+                    {#if p.value !== ''}
+                      <span class="prop-eq">=</span>
+                      <span class="prop-value">{p.value}</span>
+                    {/if}
+                    {#if p.deleted}<span class="badge removed">deleted</span>{/if}
+                  </div>
+                  {#if p.provenance !== null}
+                    <div class="prop-prov">
+                      defined <span class="loc" title={p.provenance.defined.file}>{fmtLoc(p.provenance.defined)}</span>
+                      {#each p.provenance.modified as loc, j (j)}
+                        · modified <span class="loc" title={loc.file}>{fmtLoc(loc)}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+
+              <h3>Children ({selectedNode.children.length})</h3>
+              {#if selectedNode.children.length > 0}
+                <p class="hint">
+                  {selectedNode.children.map((c) => c.name).join(', ')}
+                </p>
+              {:else}
+                <p class="hint">Leaf node.</p>
+              {/if}
+            {:else}
+              <p class="hint">Select a node in the tree.</p>
+            {/if}
+          {:else if tab === 'includes'}
+            {#if result.includeGraph !== null}
+              <IncludeGraph graph={result.includeGraph} {shorten} />
+            {:else}
+              <p class="hint">
+                Include information only exists for .dts source input — blobs and the live tree
+                are already flattened.
+              </p>
+            {/if}
+          {:else if tab === 'warnings'}
+            {#if result.warnings.length === 0}
+              <p class="hint">No warnings.</p>
+            {:else}
+              <ol class="warnings">
+                {#each result.warnings as w, i (i)}
+                  <li>{w}</li>
+                {/each}
+              </ol>
+            {/if}
+          {/if}
+        </div>
+      </section>
+    </main>
+  {:else}
+    <div class="empty">
+      <p>Open a device tree to get started:</p>
+      <ul>
+        <li><strong>Open .dts…</strong> — parse source with includes, provenance and the include graph</li>
+        <li><strong>Open .dtb…</strong> — decode a compiled blob or overlay</li>
+        <li><strong>/proc/device-tree</strong> — read the live tree of this machine</li>
+      </ul>
+      <p class="hint">
+        For source with <code>#include &lt;dt-bindings/…&gt;</code>, set the include directories
+        first (e.g. <code>path/to/kernel/include:path/to/kernel/scripts/dtc/include-prefixes</code>).
+        A demo lives in <code>examples/board.dts</code> with include dir <code>examples/include</code>.
+      </p>
+      {#if busy}<p class="busy">loading…</p>{/if}
+    </div>
+  {/if}
+</div>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+  :global(html),
+  :global(body) {
+    margin: 0;
+    height: 100%;
   }
-
-  a:hover {
-    color: #24c8db;
+  :global(body) {
+    background: #0f1115;
+    color: #d6dae3;
+    font-family:
+      Inter,
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-size: 14px;
+    --mono: ui-monospace, 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    --muted: #7a8394;
+    --border: #262c3a;
+    --panel: #151924;
+    --hover: #1d2330;
+    --selected: #24304a;
+    --accent: #7aa2ff;
+    --accent2: #4fd1c5;
   }
-
-  input,
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-size: 16px;
+    margin: 0;
+    letter-spacing: 0.5px;
+  }
+  .tagline {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
   button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
+    background: #1c2230;
+    color: #d6dae3;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
   }
-  button:active {
-    background-color: #0f0f0f69;
+  button:hover:enabled {
+    border-color: var(--accent);
   }
-}
-
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .include-dirs {
+    flex: 1;
+    min-width: 240px;
+    background: #0f131c;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #d6dae3;
+    padding: 5px 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .banner {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .banner.error {
+    background: #3a1a1a;
+    color: #fca5a5;
+    font-family: var(--mono);
+    white-space: pre-wrap;
+  }
+  .source-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .kind-badge {
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 2px 7px;
+    letter-spacing: 1px;
+  }
+  .kind-badge.dts {
+    background: #1c3a2a;
+    color: #6ee7a8;
+  }
+  .kind-badge.dtb {
+    background: #2a2440;
+    color: #c4b5fd;
+  }
+  .kind-badge.live {
+    background: #3a2f14;
+    color: #fbbf24;
+  }
+  .source-path {
+    font-family: var(--mono);
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .busy {
+    color: var(--accent);
+  }
+  main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  .tree-pane {
+    width: 46%;
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+  .search {
+    margin: 10px;
+    background: #0f131c;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #d6dae3;
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+  .tree-scroll {
+    overflow: auto;
+    flex: 1;
+    padding: 0 8px 12px;
+  }
+  .side-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 8px 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tabs button {
+    border: none;
+    background: none;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 6px 12px;
+  }
+  .tabs button.active {
+    color: #d6dae3;
+    border-bottom-color: var(--accent);
+  }
+  .tab-body {
+    overflow: auto;
+    padding: 14px 16px;
+    flex: 1;
+  }
+  .node-path {
+    font-family: var(--mono);
+    font-size: 14px;
+    margin: 0 0 8px;
+    word-break: break-all;
+  }
+  .chips {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    background: #10312e;
+    color: var(--accent2);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    border-radius: 10px;
+    padding: 2px 9px;
+  }
+  .deleted-banner {
+    background: #3a1a1a;
+    color: #fca5a5;
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+  .prov-block {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+  .prov-row {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 2px 0;
+  }
+  .prov-kind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+    width: 64px;
+  }
+  .prov-kind.defined {
+    color: #6ee7a8;
+  }
+  .prov-kind.modified {
+    color: #eab308;
+  }
+  .loc {
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin: 16px 0 8px;
+  }
+  .prop {
+    padding: 6px 0;
+    border-bottom: 1px solid #1a1f2b;
+  }
+  .prop-line {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .prop-name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+  }
+  .prop.deleted .prop-name,
+  .prop.deleted .prop-value {
+    text-decoration: line-through;
+    color: var(--muted);
+  }
+  .prop-eq {
+    color: var(--muted);
+  }
+  .prop-value {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+  .prop-prov {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .badge {
+    font-size: 10px;
+    border-radius: 8px;
+    padding: 0 6px;
+    line-height: 16px;
+  }
+  .badge.removed {
+    background: #3a1a1a;
+    color: #f87171;
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .warnings {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.7;
+    padding-left: 22px;
+  }
+  .empty {
+    padding: 48px;
+    max-width: 640px;
+  }
+  .empty ul {
+    line-height: 2;
+  }
+  code {
+    font-family: var(--mono);
+    background: #1c2230;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 12px;
+  }
 </style>

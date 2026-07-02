@@ -1,0 +1,8 @@
+/* Minimal subset of the kernel's dt-bindings GPIO header, for the demo. */
+#ifndef _DT_BINDINGS_GPIO_GPIO_H
+#define _DT_BINDINGS_GPIO_GPIO_H
+
+#define GPIO_ACTIVE_HIGH 0
+#define GPIO_ACTIVE_LOW 1
+
+#endif

@@ -1,0 +1,46 @@
+/* Demo board: includes the SoC and customizes it. Load this file with
+ * `examples/include` as an include directory to see include-graph and
+ * provenance visualization: nodes defined in soc.dtsi, modified here. */
+
+/dts-v1/;
+
+#include "soc.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "Demo Board rev1";
+	compatible = "demo,board", "demo,soc";
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-status {
+			gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
+};
+
+&cpu0 {
+	status = "okay";
+};
+
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+/* The board has no watchdog wired up. */
+/delete-node/ &wdt0;
