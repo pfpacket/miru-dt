@@ -16,6 +16,25 @@
   // Nodes start expanded down to depth 2; only the initial depth matters.
   // svelte-ignore state_referenced_locally
   let expanded = $state(depth < 2);
+  let rowEl: HTMLDivElement | undefined = $state(undefined);
+
+  // Reveal the selection: when a node inside this subtree is selected
+  // (e.g. by clicking a phandle reference), expand so it becomes visible,
+  // and scroll the selected row into view.
+  $effect(() => {
+    if (
+      selectedPath !== null &&
+      selectedPath !== path &&
+      (path === '/' || selectedPath.startsWith(path + '/'))
+    ) {
+      expanded = true;
+    }
+  });
+  $effect(() => {
+    if (selectedPath === path) {
+      rowEl?.scrollIntoView({ block: 'nearest' });
+    }
+  });
 
   function nodeMatches(n: DtNode, q: string): boolean {
     return (
@@ -40,7 +59,12 @@
 
 {#if visible}
   <div class="tree-item">
-    <div class="row" class:selected={selectedPath === path} style:padding-left="{depth * 14 + 4}px">
+    <div
+      bind:this={rowEl}
+      class="row"
+      class:selected={selectedPath === path}
+      style:padding-left="{depth * 14 + 4}px"
+    >
       <button
         class="disclosure"
         disabled={node.children.length === 0}

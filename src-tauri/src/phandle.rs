@@ -89,7 +89,7 @@ fn cstr(bytes: &[u8]) -> Option<String> {
 pub fn into_model(root: &RawNode) -> DtNode {
     let mut maps = RefMaps::default();
     collect(root, "/", &mut maps);
-    build(root, &maps)
+    build(root, "/", &maps)
 }
 
 fn collect(node: &RawNode, path: &str, maps: &mut RefMaps) {
@@ -126,8 +126,12 @@ fn collect(node: &RawNode, path: &str, maps: &mut RefMaps) {
     }
 }
 
-fn build(node: &RawNode, maps: &RefMaps) -> DtNode {
+fn build(node: &RawNode, path: &str, maps: &RefMaps) -> DtNode {
     let mut out = DtNode::new(node.name.clone());
+    // Surface __symbols__ labels on the node itself, like labels in source.
+    if let Some(label) = maps.label_by_path.get(path) {
+        out.labels.push(label.clone());
+    }
     for (name, bytes) in &node.properties {
         out.properties.push(DtProperty {
             name: name.clone(),
@@ -137,7 +141,12 @@ fn build(node: &RawNode, maps: &RefMaps) -> DtNode {
         });
     }
     for child in &node.children {
-        out.children.push(build(child, maps));
+        let child_path = if path == "/" {
+            format!("/{}", child.name)
+        } else {
+            format!("{path}/{}", child.name)
+        };
+        out.children.push(build(child, &child_path, maps));
     }
     out
 }
@@ -260,6 +269,9 @@ mod tests {
         });
         let tree = into_model(&raw);
         assert_eq!(prop_value(&tree, "uart", "clocks"), "<&clk0 0x3>");
+        // The label is also attached to the referenced node itself.
+        let clk = tree.children.iter().find(|c| c.name == "clk").unwrap();
+        assert_eq!(clk.labels, vec!["clk0"]);
     }
 
     #[test]

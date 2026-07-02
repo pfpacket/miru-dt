@@ -4,9 +4,10 @@
   interface Props {
     graph: IncludeGraph;
     shorten: (file: string) => string;
+    onopen: (file: string) => void;
   }
 
-  let { graph, shorten }: Props = $props();
+  let { graph, shorten, onopen }: Props = $props();
 
   interface Row {
     file: string;
@@ -50,9 +51,15 @@
   {#each rows as row, i (i)}
     <div class="file-row" style:padding-left="{row.depth * 18 + 4}px">
       {#if row.depth > 0}<span class="elbow">└─</span>{/if}
-      <span class="file" class:root={row.depth === 0} class:repeat={row.repeat} title={row.file}>
+      <button
+        class="file"
+        class:root={row.depth === 0}
+        class:repeat={row.repeat}
+        title="open {row.file} in editor"
+        onclick={() => onopen(row.file)}
+      >
         {shorten(row.file)}
-      </span>
+      </button>
       {#if row.directive !== null}
         <span class="edge-info">{row.directive} at line {row.line}</span>
       {/if}
@@ -87,6 +94,16 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    background: none;
+    border: none;
+    color: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .file:hover {
+    color: var(--accent, #7aa2ff);
+    text-decoration: underline;
   }
   .file.root {
     font-weight: 600;

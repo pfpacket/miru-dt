@@ -16,6 +16,11 @@ A device tree visualizer: a Tauri GUI app for inspecting Linux device trees.
   (`interrupt-parent`, `clocks`, `*-gpios`, `*-supply`, …) are resolved back to the node they
   point at and shown as `&label` (when the blob has `__symbols__`, i.e. compiled with
   `dtc -@`) or `&{/node/path}`; phandle+args lists are decoded using the target's `#*-cells`.
+- **Click-through navigation**: clicking a file name (provenance sites, include list, graph
+  nodes) opens it in your editor at the right line — set `MIRU_DT_EDITOR` to a shell template
+  like `MIRU_DT_EDITOR='vim "+{line}" "{file}"'` or rely on the default (`code --goto`, then
+  the system opener). Clicking a `&label` / `&{/path}` reference in a property value jumps to
+  the referenced node.
 - Filterable tree, macro expansion from `dt-bindings` headers, warnings panel for unresolved
   references and preprocessor issues.
 

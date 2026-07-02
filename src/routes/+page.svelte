@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { DtNode, LoadResult, SourceLoc } from '$lib/types';
-  import { loadDtb, loadDts, loadLive, pickDtbFile, pickDtsFile } from '$lib/api';
+  import { loadDtb, loadDts, loadLive, openSource, pickDtbFile, pickDtsFile } from '$lib/api';
   import TreeNode from '$lib/TreeNode.svelte';
   import IncludeGraph from '$lib/IncludeGraph.svelte';
   import DependencyGraph from '$lib/DependencyGraph.svelte';
@@ -78,6 +78,65 @@
     tab = 'details';
   }
 
+  function openFile(file: string, line?: number) {
+    openSource(file, line).catch((e) => (error = String(e)));
+  }
+
+  // label -> absolute node path, for resolving `&label` references in values.
+  const labelPaths = $derived.by(() => {
+    const map = new Map<string, string>();
+    if (result !== null) collectLabels(result.tree, '/', map);
+    return map;
+  });
+
+  function collectLabels(node: DtNode, path: string, map: Map<string, string>) {
+    for (const label of node.labels) map.set(label, path);
+    for (const child of node.children) {
+      collectLabels(child, path === '/' ? `/${child.name}` : `${path}/${child.name}`, map);
+    }
+  }
+
+  function nodeAt(path: string): DtNode | null {
+    let node: DtNode | undefined = result?.tree;
+    for (const seg of path.split('/').filter(Boolean)) {
+      node = node?.children.find((c) => c.name === seg);
+    }
+    return node ?? null;
+  }
+
+  function refPath(target: string): string | null {
+    const path = target.startsWith('/') ? target : (labelPaths.get(target) ?? null);
+    return path !== null && nodeAt(path) !== null ? path : null;
+  }
+
+  function gotoRef(target: string) {
+    const path = refPath(target);
+    if (path === null) return;
+    const node = nodeAt(path);
+    if (node !== null) onselect(path, node);
+  }
+
+  interface ValueSeg {
+    text: string;
+    target: string | null;
+  }
+
+  // Split a property value into plain text and `&label` / `&{/path}`
+  // reference segments so references can be rendered as links.
+  function valueSegments(value: string): ValueSeg[] {
+    const out: ValueSeg[] = [];
+    const re = /&\{([^}]*)\}|&([A-Za-z_][A-Za-z0-9_]*)/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(value)) !== null) {
+      if (m.index > last) out.push({ text: value.slice(last, m.index), target: null });
+      out.push({ text: m[0], target: m[1] !== undefined ? m[1] : m[2] });
+      last = m.index + m[0].length;
+    }
+    if (last < value.length) out.push({ text: value.slice(last), target: null });
+    return out;
+  }
+
   // Dev-only autoload for automated UI verification:
   //   VITE_AUTOLOAD=<file> VITE_AUTOLOAD_KIND=<dts|dtb|live> VITE_AUTOLOAD_INC=<dirs>
   //   VITE_AUTOLOAD_SELECT=</node/path> VITE_AUTOLOAD_TAB=<tab> bun run tauri dev
@@ -103,6 +162,11 @@
     }).then(() => {
       const t = import.meta.env.VITE_AUTOLOAD_TAB as string | undefined;
       if (t === 'details' || t === 'includes' || t === 'graph' || t === 'warnings') tab = t;
+      // Exercise reference navigation / editor opening like a click would.
+      const goto = import.meta.env.VITE_AUTOLOAD_GOTO as string | undefined;
+      if (typeof goto === 'string' && goto !== '') gotoRef(goto);
+      const open = import.meta.env.VITE_AUTOLOAD_OPEN as string | undefined;
+      if (typeof open === 'string' && open !== '') openFile(open, 42);
     });
   });
 </script>
@@ -127,6 +191,16 @@
     />
   </header>
 
+  {#snippet locLink(loc: SourceLoc)}
+    <button
+      class="loc"
+      title="open {loc.file}:{loc.line} in editor"
+      onclick={() => openFile(loc.file, loc.line)}
+    >
+      {fmtLoc(loc)}
+    </button>
+  {/snippet}
+
   {#if error !== null}
     <div class="banner error">{error}</div>
   {/if}
@@ -134,7 +208,17 @@
   {#if result !== null}
     <div class="source-line">
       <span class="kind-badge {result.kind}">{result.kind}</span>
-      <span class="source-path" title={result.source}>{result.source}</span>
+      {#if result.kind === 'dts'}
+        <button
+          class="source-path clickable"
+          title="open {result.source} in editor"
+          onclick={() => result !== null && openFile(result.source)}
+        >
+          {result.source}
+        </button>
+      {:else}
+        <span class="source-path" title={result.source}>{result.source}</span>
+      {/if}
       {#if busy}<span class="busy">loading…</span>{/if}
     </div>
     <main>
@@ -178,14 +262,12 @@
                 <div class="prov-block">
                   <div class="prov-row">
                     <span class="prov-kind defined">defined</span>
-                    <span class="loc" title={selectedNode.provenance.defined.file}>
-                      {fmtLoc(selectedNode.provenance.defined)}
-                    </span>
+                    {@render locLink(selectedNode.provenance.defined)}
                   </div>
                   {#each selectedNode.provenance.modified as loc, i (i)}
                     <div class="prov-row">
                       <span class="prov-kind modified">modified</span>
-                      <span class="loc" title={loc.file}>{fmtLoc(loc)}</span>
+                      {@render locLink(loc)}
                     </div>
                   {/each}
                 </div>
@@ -206,7 +288,21 @@
                     <span class="prop-name">{p.name}</span>
                     {#if p.value !== ''}
                       <span class="prop-eq">=</span>
-                      <span class="prop-value">{p.value}</span>
+                      <span class="prop-value">
+                        {#each valueSegments(p.value) as seg, k (k)}
+                          {#if seg.target !== null && refPath(seg.target) !== null}
+                            <button
+                              class="ref-link"
+                              title="go to {refPath(seg.target)}"
+                              onclick={() => seg.target !== null && gotoRef(seg.target)}
+                            >
+                              {seg.text}
+                            </button>
+                          {:else}
+                            {seg.text}
+                          {/if}
+                        {/each}
+                      </span>
                     {/if}
                     {#if p.provenance !== null && p.provenance.modified.length > 0}
                       <span
@@ -222,12 +318,12 @@
                     <div class="prop-sites">
                       <div class="prov-row">
                         <span class="prov-kind defined">defined</span>
-                        <span class="loc" title={p.provenance.defined.file}>{fmtLoc(p.provenance.defined)}</span>
+                        {@render locLink(p.provenance.defined)}
                       </div>
                       {#each p.provenance.modified as loc, j (j)}
                         <div class="prov-row">
                           <span class="prov-kind modified">modified</span>
-                          <span class="loc" title={loc.file}>{fmtLoc(loc)}</span>
+                          {@render locLink(loc)}
                         </div>
                       {/each}
                     </div>
@@ -248,7 +344,7 @@
             {/if}
           {:else if tab === 'includes'}
             {#if result.includeGraph !== null}
-              <IncludeGraph graph={result.includeGraph} {shorten} />
+              <IncludeGraph graph={result.includeGraph} {shorten} onopen={openFile} />
             {:else}
               <p class="hint">
                 Include information only exists for .dts source input — blobs and the live tree
@@ -257,7 +353,7 @@
             {/if}
           {:else if tab === 'graph'}
             {#if result.includeGraph !== null}
-              <DependencyGraph graph={result.includeGraph} {shorten} />
+              <DependencyGraph graph={result.includeGraph} {shorten} onopen={openFile} />
             {:else}
               <p class="hint">
                 The dependency graph only exists for .dts source input — blobs and the live tree
@@ -532,6 +628,38 @@
   .loc {
     font-family: var(--mono);
     font-size: 12px;
+    background: none;
+    border: none;
+    color: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .loc:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .source-path.clickable {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .source-path.clickable:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .ref-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--accent2);
+    cursor: pointer;
+  }
+  .ref-link:hover {
+    text-decoration: underline;
   }
   h3 {
     font-size: 12px;

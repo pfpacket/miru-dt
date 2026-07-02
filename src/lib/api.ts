@@ -29,3 +29,7 @@ export function loadDtb(path: string): Promise<LoadResult> {
 export function loadLive(): Promise<LoadResult> {
   return invoke<LoadResult>('load_live', {});
 }
+
+export function openSource(file: string, line?: number): Promise<void> {
+  return invoke<void>('open_source', { file, line });
+}
