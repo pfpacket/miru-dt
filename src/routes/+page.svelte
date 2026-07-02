@@ -79,12 +79,20 @@
   }
 
   // Dev-only autoload for automated UI verification:
-  //   VITE_AUTOLOAD=<file.dts> VITE_AUTOLOAD_INC=<dirs> VITE_AUTOLOAD_SELECT=</node/path> bun run tauri dev
+  //   VITE_AUTOLOAD=<file> VITE_AUTOLOAD_KIND=<dts|dtb|live> VITE_AUTOLOAD_INC=<dirs>
+  //   VITE_AUTOLOAD_SELECT=</node/path> VITE_AUTOLOAD_TAB=<tab> bun run tauri dev
   onMount(() => {
     const auto = import.meta.env.VITE_AUTOLOAD as string | undefined;
     if (!import.meta.env.DEV || typeof auto !== 'string' || auto === '') return;
     includeDirsRaw = (import.meta.env.VITE_AUTOLOAD_INC as string | undefined) ?? '';
-    void run({ kind: 'dts', path: auto }).then(() => {
+    const kind = (import.meta.env.VITE_AUTOLOAD_KIND as string | undefined) ?? 'dts';
+    const load: LastLoad =
+      kind === 'dtb'
+        ? { kind: 'dtb', path: auto }
+        : kind === 'live'
+          ? { kind: 'live' }
+          : { kind: 'dts', path: auto };
+    void run(load).then(() => {
       const sel = import.meta.env.VITE_AUTOLOAD_SELECT as string | undefined;
       if (!sel || result === null) return;
       let node: DtNode | undefined = result.tree;

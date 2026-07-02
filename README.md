@@ -12,6 +12,10 @@ A device tree visualizer: a Tauri GUI app for inspecting Linux device trees.
   was defined and every later site that modified it — re-opened nodes, `&label { … }` overrides,
   property overrides, `/delete-node/` and `/delete-property/` (deleted items stay visible,
   struck through, so the deletion site remains traceable).
+- **Phandle resolution** (blob and live input): numeric phandles in reference properties
+  (`interrupt-parent`, `clocks`, `*-gpios`, `*-supply`, …) are resolved back to the node they
+  point at and shown as `&label` (when the blob has `__symbols__`, i.e. compiled with
+  `dtc -@`) or `&{/node/path}`; phandle+args lists are decoded using the target's `#*-cells`.
 - Filterable tree, macro expansion from `dt-bindings` headers, warnings panel for unresolved
   references and preprocessor issues.
 

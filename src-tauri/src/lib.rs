@@ -2,6 +2,7 @@ pub mod dtb;
 pub mod dts;
 pub mod live;
 pub mod model;
+pub mod phandle;
 pub mod render;
 
 use model::LoadResult;

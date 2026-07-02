@@ -1,9 +1,11 @@
 //! Flattened device tree (.dtb / .dtbo) parsing into the common model.
 //! Binary trees carry no source information, so nodes and properties have
-//! no provenance; property values are rendered heuristically.
+//! no provenance. Phandle references are resolved back to node paths (and
+//! `__symbols__` labels when present) by the phandle module; everything else
+//! is rendered heuristically.
 
-use crate::model::{DtNode, DtProperty, LoadResult};
-use crate::render::render_value;
+use crate::model::{DtNode, LoadResult};
+use crate::phandle::{self, RawNode};
 use std::path::Path;
 
 const FDT_MAGIC: u32 = 0xd00d_feed;
@@ -39,7 +41,7 @@ pub fn parse_dtb(bytes: &[u8]) -> Result<DtNode, String> {
     let off_strings = be32(bytes, 12)? as usize;
 
     let mut pos = off_struct;
-    let mut stack: Vec<DtNode> = Vec::new();
+    let mut stack: Vec<RawNode> = Vec::new();
     loop {
         let token = be32(bytes, pos)?;
         pos += 4;
@@ -52,13 +54,17 @@ pub fn parse_dtb(bytes: &[u8]) -> Result<DtNode, String> {
                 } else {
                     name
                 };
-                stack.push(DtNode::new(name));
+                stack.push(RawNode {
+                    name,
+                    properties: Vec::new(),
+                    children: Vec::new(),
+                });
             }
             FDT_END_NODE => {
                 let node = stack.pop().ok_or("unbalanced FDT_END_NODE")?;
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
-                    None => return Ok(node),
+                    None => return Ok(phandle::into_model(&node)),
                 }
             }
             FDT_PROP => {
@@ -71,12 +77,7 @@ pub fn parse_dtb(bytes: &[u8]) -> Result<DtNode, String> {
                 pos = (pos + len + 3) & !3;
                 let (name, _) = cstr(bytes, off_strings + nameoff)?;
                 let node = stack.last_mut().ok_or("property outside of any node")?;
-                node.properties.push(DtProperty {
-                    name,
-                    value: render_value(value),
-                    deleted: false,
-                    provenance: None,
-                });
+                node.properties.push((name, value.to_vec()));
             }
             FDT_NOP => {}
             FDT_END => return Err("blob ends without a root node".into()),

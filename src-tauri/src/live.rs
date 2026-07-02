@@ -1,9 +1,10 @@
 //! Reader for the live device tree exposed by the Linux kernel at
 //! /proc/device-tree (a symlink to /sys/firmware/devicetree/base):
-//! directories are nodes, files are properties.
+//! directories are nodes, files are properties. Phandle references are
+//! resolved back to node paths by the phandle module.
 
-use crate::model::{DtNode, DtProperty, LoadResult};
-use crate::render::render_value;
+use crate::model::LoadResult;
+use crate::phandle::{self, RawNode};
 use std::path::Path;
 
 pub fn load(path: &str) -> Result<LoadResult, String> {
@@ -14,18 +15,22 @@ pub fn load(path: &str) -> Result<LoadResult, String> {
         ));
     }
     let mut warnings = Vec::new();
-    let tree = read_node(p, "/", &mut warnings)?;
+    let raw = read_node(p, "/", &mut warnings)?;
     Ok(LoadResult {
         source: path.to_string(),
         kind: "live".into(),
-        tree,
+        tree: phandle::into_model(&raw),
         include_graph: None,
         warnings,
     })
 }
 
-fn read_node(dir: &Path, name: &str, warnings: &mut Vec<String>) -> Result<DtNode, String> {
-    let mut node = DtNode::new(name);
+fn read_node(dir: &Path, name: &str, warnings: &mut Vec<String>) -> Result<RawNode, String> {
+    let mut node = RawNode {
+        name: name.to_string(),
+        properties: Vec::new(),
+        children: Vec::new(),
+    };
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
         .filter_map(Result::ok)
@@ -44,12 +49,7 @@ fn read_node(dir: &Path, name: &str, warnings: &mut Vec<String>) -> Result<DtNod
             }
         } else {
             match std::fs::read(entry.path()) {
-                Ok(bytes) => node.properties.push(DtProperty {
-                    name: entry_name,
-                    value: render_value(&bytes),
-                    deleted: false,
-                    provenance: None,
-                }),
+                Ok(bytes) => node.properties.push((entry_name, bytes)),
                 Err(e) => warnings.push(format!("{}: {e}", entry.path().display())),
             }
         }

@@ -16,6 +16,13 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
+    // The Tauri webview keeps its HTTP cache across dev-server restarts;
+    // stale modules then request style virtual modules the fresh server has
+    // no compile cache for, which surfaces as bogus postcss errors. Forbid
+    // caching in dev entirely.
+    headers: {
+      "Cache-Control": "no-store",
+    },
     host: host || false,
     hmr: host
       ? {
