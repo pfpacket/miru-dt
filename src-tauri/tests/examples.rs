@@ -36,11 +36,21 @@ fn parses_the_bundled_examples() {
     let graph = r.include_graph.as_ref().unwrap();
     assert_eq!(
         graph.edges.len(),
-        2,
-        "board.dts has two #include directives"
+        4,
+        "three includes in board.dts plus one in soc.dtsi"
     );
-    assert_eq!(graph.files.len(), 3);
+    assert_eq!(graph.files.len(), 4);
     assert!(graph.edges.iter().all(|e| e.directive == "#include"));
+    // The clock header is a shared include: pulled in by both soc.dtsi and
+    // board.dts (a diamond in the dependency graph).
+    let clock_users: Vec<&str> = graph
+        .edges
+        .iter()
+        .filter(|e| e.to.ends_with("demo-clock.h"))
+        .map(|e| e.from.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(clock_users.len(), 2);
+    assert!(clock_users.contains(&"soc.dtsi") && clock_users.contains(&"board.dts"));
 
     // uart0: defined disabled by the SoC include, enabled by the board.
     let soc = child(&r.tree, "soc");

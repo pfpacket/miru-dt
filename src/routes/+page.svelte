@@ -4,6 +4,7 @@
   import { loadDtb, loadDts, loadLive, pickDtbFile, pickDtsFile } from '$lib/api';
   import TreeNode from '$lib/TreeNode.svelte';
   import IncludeGraph from '$lib/IncludeGraph.svelte';
+  import DependencyGraph from '$lib/DependencyGraph.svelte';
 
   type LastLoad =
     | { kind: 'dts'; path: string }
@@ -17,7 +18,7 @@
   let includeDirsRaw = $state('');
   let selectedPath = $state<string | null>(null);
   let selectedNode = $state<DtNode | null>(null);
-  let tab = $state<'details' | 'includes' | 'warnings'>('details');
+  let tab = $state<'details' | 'includes' | 'graph' | 'warnings'>('details');
   let lastLoad = $state<LastLoad | null>(null);
 
   const includeDirs = $derived(
@@ -91,6 +92,9 @@
         node = node?.children.find((c) => c.name === seg);
       }
       if (node !== undefined) onselect(sel, node);
+    }).then(() => {
+      const t = import.meta.env.VITE_AUTOLOAD_TAB as string | undefined;
+      if (t === 'details' || t === 'includes' || t === 'graph' || t === 'warnings') tab = t;
     });
   });
 </script>
@@ -139,6 +143,7 @@
           <button class:active={tab === 'includes'} onclick={() => (tab = 'includes')}>
             Includes{result.includeGraph ? ` (${result.includeGraph.edges.length})` : ''}
           </button>
+          <button class:active={tab === 'graph'} onclick={() => (tab = 'graph')}>Graph</button>
           <button class:active={tab === 'warnings'} onclick={() => (tab = 'warnings')}>
             Warnings ({result.warnings.length})
           </button>
@@ -239,6 +244,15 @@
             {:else}
               <p class="hint">
                 Include information only exists for .dts source input — blobs and the live tree
+                are already flattened.
+              </p>
+            {/if}
+          {:else if tab === 'graph'}
+            {#if result.includeGraph !== null}
+              <DependencyGraph graph={result.includeGraph} {shorten} />
+            {:else}
+              <p class="hint">
+                The dependency graph only exists for .dts source input — blobs and the live tree
                 are already flattened.
               </p>
             {/if}

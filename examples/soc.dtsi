@@ -1,5 +1,7 @@
 /* Demo SoC include: defines the hardware; boards enable and extend it. */
 
+#include <dt-bindings/clock/demo-clock.h>
+
 / {
 	#address-cells = <1>;
 	#size-cells = <1>;
@@ -22,9 +24,16 @@
 		#size-cells = <1>;
 		ranges;
 
+		clk0: clock-controller@10080000 {
+			compatible = "demo,clk";
+			reg = <0x10080000 0x1000>;
+			#clock-cells = <1>;
+		};
+
 		uart0: serial@10000000 {
 			compatible = "ns16550a";
 			reg = <0x10000000 0x100>;
+			clocks = <&clk0 DEMO_CLK_UART>;
 			clock-frequency = <3686400>;
 			status = "disabled";
 		};

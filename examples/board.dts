@@ -6,6 +6,7 @@
 
 #include "soc.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/clock/demo-clock.h>
 
 / {
 	model = "Demo Board rev1";
@@ -36,6 +37,7 @@
 &uart0 {
 	status = "okay";
 	current-speed = <115200>;
+	assigned-clocks = <&clk0 DEMO_CLK_UART>;
 };
 
 &gpio0 {
