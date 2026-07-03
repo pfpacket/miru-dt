@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { DtNode, LoadResult, SourceLoc } from '$lib/types';
-  import { loadDtb, loadDts, loadLive, openSource, pickDtbFile, pickDtsFile } from '$lib/api';
+  import { loadDtb, loadDts, loadLive, openSource, pickDeviceTreeFile } from '$lib/api';
   import TreeNode from '$lib/TreeNode.svelte';
   import IncludeGraph from '$lib/IncludeGraph.svelte';
   import DependencyGraph from '$lib/DependencyGraph.svelte';
@@ -40,7 +40,7 @@
     return `${shorten(loc.file)}:${loc.line}`;
   }
 
-  async function run(load: LastLoad) {
+  async function run(load: LastLoad): Promise<boolean> {
     busy = true;
     error = null;
     try {
@@ -55,21 +55,31 @@
       selectedPath = '/';
       selectedNode = result.tree;
       tab = 'details';
+      return true;
     } catch (e) {
       error = String(e);
+      return false;
     } finally {
       busy = false;
     }
   }
 
-  async function openDts() {
-    const path = await pickDtsFile();
-    if (path !== null) await run({ kind: 'dts', path });
-  }
-
-  async function openDtb() {
-    const path = await pickDtbFile();
-    if (path !== null) await run({ kind: 'dtb', path });
+  async function openPicked() {
+    const path = await pickDeviceTreeFile();
+    if (path === null) return;
+    const lower = path.toLowerCase();
+    if (lower.endsWith('.dtb') || lower.endsWith('.dtbo')) {
+      await run({ kind: 'dtb', path });
+    } else if (lower.endsWith('.dts') || lower.endsWith('.dtsi') || lower.endsWith('.dtso')) {
+      await run({ kind: 'dts', path });
+    } else {
+      // Unknown extension: the blob parser rejects non-blobs instantly via
+      // the FDT magic, so try it first and fall back to source parsing.
+      const ok = await run({ kind: 'dtb', path });
+      if (!ok && error !== null && error.includes('bad magic')) {
+        await run({ kind: 'dts', path });
+      }
+    }
   }
 
   function onselect(path: string, node: DtNode) {
@@ -176,8 +186,7 @@
     <h1>miru-dt</h1>
     <span class="tagline">device tree visualizer</span>
     <div class="actions">
-      <button onclick={openDts} disabled={busy}>Open .dts…</button>
-      <button onclick={openDtb} disabled={busy}>Open .dtb…</button>
+      <button onclick={openPicked} disabled={busy}>Open…</button>
       <button onclick={() => run({ kind: 'live' })} disabled={busy}>/proc/device-tree</button>
       {#if lastLoad !== null}
         <button onclick={() => lastLoad && run(lastLoad)} disabled={busy}>Reload</button>
@@ -378,8 +387,11 @@
     <div class="empty">
       <p>Open a device tree to get started:</p>
       <ul>
-        <li><strong>Open .dts…</strong> — parse source with includes, provenance and the include graph</li>
-        <li><strong>Open .dtb…</strong> — decode a compiled blob or overlay</li>
+        <li>
+          <strong>Open…</strong> — a <code>.dts</code>/<code>.dtsi</code> source (parsed with
+          includes, provenance and the include graph) or a compiled <code>.dtb</code>/<code>.dtbo</code>
+          blob (phandles resolved); the type is detected from the file
+        </li>
         <li><strong>/proc/device-tree</strong> — read the live tree of this machine</li>
       </ul>
       <p class="hint">

@@ -16,10 +16,11 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    // The Tauri webview keeps its HTTP cache across dev-server restarts;
-    // stale modules then request style virtual modules the fresh server has
-    // no compile cache for, which surfaces as bogus postcss errors. Forbid
-    // caching in dev entirely.
+    // Stop the Tauri webview caching dev assets across restarts, so a stale
+    // client can't request virtual modules out of order. (Note: this does not
+    // suppress the occasional vite-plugin-svelte "?type=style ... Unknown
+    // word" overlay in dev — that is a server-side transform flake cleared by
+    // deleting node_modules/.vite; production builds are unaffected.)
     headers: {
       "Cache-Control": "no-store",
     },

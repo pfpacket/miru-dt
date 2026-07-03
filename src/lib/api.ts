@@ -2,18 +2,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { LoadResult } from './types';
 
-export async function pickDtsFile(): Promise<string | null> {
+export async function pickDeviceTreeFile(): Promise<string | null> {
   const picked = await open({
     multiple: false,
-    filters: [{ name: 'Device tree source', extensions: ['dts', 'dtsi', 'dtso'] }],
-  });
-  return typeof picked === 'string' ? picked : null;
-}
-
-export async function pickDtbFile(): Promise<string | null> {
-  const picked = await open({
-    multiple: false,
-    filters: [{ name: 'Device tree blob', extensions: ['dtb', 'dtbo'] }],
+    filters: [
+      { name: 'Device tree files', extensions: ['dts', 'dtsi', 'dtso', 'dtb', 'dtbo'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
   });
   return typeof picked === 'string' ? picked : null;
 }
